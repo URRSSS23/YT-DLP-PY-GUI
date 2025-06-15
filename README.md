@@ -16,6 +16,19 @@ A feature-rich YouTube downloader with GUI built using Python and PyQt6. Support
 - Dark mode UI
 - Cross-platform (Windows, macOS, Linux)
 
+### ✅ Supported platforms:
+
+* **YouTube**
+* **Vimeo**
+* **Dailymotion**
+* **Facebook**
+* **Instagram**
+* **TikTok**
+* **Twitter (X)**
+* **Twitch**
+* **SoundCloud**
+* **Bandcamp**
+
 ## Installation
 
 ### Prerequisites
