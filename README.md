@@ -1,6 +1,6 @@
-# Modern YouTube Downloader
+# GUI Downloader
 
-![Screenshot](assets/screenshot.png)
+![screenshots](https://github.com/user-attachments/assets/de615cdd-0d84-4b04-ae92-0f3aa2335d17)
 
 A feature-rich YouTube downloader with GUI built using Python and PyQt6. Supports video/audio downloads, playlists, batch processing, metadata embedding, and more.
 
@@ -20,7 +20,7 @@ A feature-rich YouTube downloader with GUI built using Python and PyQt6. Support
 
 ### Prerequisites
 - Python 3.9+
-- FFmpeg (for format conversion)
+- [FFmpeg](https://github.com/yt-dlp/FFmpeg-Builds/releases)
 
 ### Steps
 1. Clone the repository:
