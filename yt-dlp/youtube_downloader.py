@@ -8,6 +8,7 @@ import time
 import tempfile
 import requests
 import base64
+import platform
 from pathlib import Path
 from typing import Optional
 from PyQt6.QtWidgets import (
@@ -30,7 +31,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setFixedSize(500, 400)
+        self.setFixedSize(500, 450)
         
         layout = QVBoxLayout()
         
@@ -68,6 +69,10 @@ class SettingsDialog(QDialog):
         self.container_combo = QComboBox()
         self.container_combo.addItems(["MP4", "WEBM", "MKV", "Original"])
         
+        self.audio_quality_label = QLabel("Default Audio Quality:")
+        self.audio_quality_combo = QComboBox()
+        self.audio_quality_combo.addItems(["192KBPS", "256KBPS", "320KBPS", "Best"])
+        
         self.metadata_label = QLabel("Metadata Options:")
         self.metadata_check = QCheckBox("Add metadata to audio files")
         self.thumbnail_check = QCheckBox("Embed thumbnails in audio files")
@@ -93,6 +98,9 @@ class SettingsDialog(QDialog):
         layout.addSpacing(10)
         layout.addWidget(self.container_label)
         layout.addWidget(self.container_combo)
+        layout.addSpacing(10)
+        layout.addWidget(self.audio_quality_label)
+        layout.addWidget(self.audio_quality_combo)
         layout.addSpacing(15)
         layout.addWidget(self.metadata_label)
         layout.addWidget(self.metadata_check)
@@ -118,6 +126,7 @@ class SettingsDialog(QDialog):
             "ffmpeg_path": self.ffmpeg_edit.text(),
             "preferred_format": self.format_combo.currentText(),
             "container": self.container_combo.currentText(),
+            "audio_quality": self.audio_quality_combo.currentText(),
             "add_metadata": self.metadata_check.isChecked(),
             "embed_thumbnails": self.thumbnail_check.isChecked()
         }
@@ -135,6 +144,11 @@ class SettingsDialog(QDialog):
         index = self.container_combo.findText(container_text)
         if index >= 0:
             self.container_combo.setCurrentIndex(index)
+            
+        audio_quality_text = settings.get("audio_quality", "192KBPS")
+        index = self.audio_quality_combo.findText(audio_quality_text)
+        if index >= 0:
+            self.audio_quality_combo.setCurrentIndex(index)
             
         self.metadata_check.setChecked(settings.get("add_metadata", True))
         self.thumbnail_check.setChecked(settings.get("embed_thumbnails", True))
@@ -155,121 +169,210 @@ class DownloadThread(QThread):
     
     def run(self):
         try:
-            cmd = ["yt-dlp", self.url]
-            
-            format_map = {
-                "Best Quality": ["-f", "bestvideo+bestaudio/best"],
-                "1080p": ["-f", "bestvideo[height<=1080]+bestaudio[height<=1080]/best[height<=1080]"],
-                "720p": ["-f", "bestvideo[height<=720]+bestaudio[height<=720]/best[height<=720]"],
-                "480p": ["-f", "bestvideo[height<=480]+bestaudio[height<=480]/best[height<=480]"],
-                "360p": ["-f", "bestvideo[height<=360]+bestaudio[height<=360]/best[height<=360]"],
-                "Audio Only (MP3)": ["-x", "--audio-format", "mp3"],
-                "Audio Only (OGG)": ["-x", "--audio-format", "ogg"]
-            }
-            
-            format_option = self.options.get("format", "Best Quality")
-            if format_option in format_map:
-                cmd.extend(format_map[format_option])
-            else:
-                cmd.extend(["-f", "bestvideo+bestaudio/best"])
-            
-            output_path = self.options.get("output_path", "")
-            if output_path:
-                abs_path = os.path.abspath(output_path)
-                cmd.extend(["-o", f"{abs_path}/%(title)s [%(id)s].%(ext)s"])
-            
-            if self.ffmpeg_dir:
-                cmd.extend(["--ffmpeg-location", self.ffmpeg_dir])
-            
-            if self.options.get("is_playlist", False):
-                cmd.append("--yes-playlist")
-            else:
-                cmd.append("--no-playlist")
-            
-            if format_option not in ["Audio Only (MP3)", "Audio Only (OGG)"]:
-                container = self.options.get("container", "MP4")
-                if container != "Original":
-                    cmd.extend(["--merge-output-format", container.lower()])
-            
-            if format_option in ["Audio Only (MP3)", "Audio Only (OGG)"]:
-                if self.settings.get("add_metadata", True):
-                    cmd.append("--add-metadata")
-                if self.settings.get("embed_thumbnails", True):
-                    cmd.append("--embed-thumbnail")
-            
-            self.output_signal.emit(f"Command: {' '.join(cmd)}\n")
-            
-            try:
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
-            except FileNotFoundError:
-                self.output_signal.emit("Error: yt-dlp not found. Please ensure it's installed.")
-                self.finished_signal.emit(False, "yt-dlp not installed")
-                return
-            except Exception as e:
-                self.output_signal.emit(f"Error starting process: {str(e)}")
-                self.finished_signal.emit(False, f"Process error: {str(e)}")
-                return
-            
-            if process.stdout is None:
-                self.output_signal.emit("Error: No output stream available from process")
-                self.finished_signal.emit(False, "No process output")
-                return
-            
-            while True:
-                if not self.is_running:
-                    process.terminate()
-                    break
+            # Create a temporary directory for downloads
+            with tempfile.TemporaryDirectory() as temp_dir:
+                cmd = ["yt-dlp", self.url]
+                
+                # Add optimized download options
+                cmd.extend([
+                    "--no-continue",
+                    "--no-part",
+                    "--console-title",
+                    "--no-cache-dir",
+                    "--retries", "10",
+                    "--fragment-retries", "10",
+                    "--socket-timeout", "30"
+                ])
+                
+                # Enhanced format selection with AV1 avoidance
+                format_map = {
+                    "Best Quality": ["-f", "bestvideo[ext!=webm][vcodec!*=av01]+bestaudio[ext!=webm]/best[ext!=webm]"],
+                    "1080p": ["-f", "bestvideo[height<=1080][vcodec!*=av01]+bestaudio[height<=1080]/best[height<=1080]"],
+                    "720p": ["-f", "bestvideo[height<=720][vcodec!*=av01]+bestaudio[height<=720]/best[height<=720]"],
+                    "480p": ["-f", "bestvideo[height<=480][vcodec!*=av01]+bestaudio[height<=480]/best[height<=480]"],
+                    "360p": ["-f", "bestvideo[height<=360][vcodec!*=av01]+bestaudio[height<=360]/best[height<=360]"],
+                    "Audio Only (MP3)": ["-x", "--audio-format", "mp3"],
+                    "Audio Only (OGG)": ["-x", "--audio-format", "ogg"]
+                }
+                
+                format_option = self.options.get("format", "Best Quality")
+                if format_option in format_map:
+                    cmd.extend(format_map[format_option])
+                else:
+                    cmd.extend(["-f", "bestvideo+bestaudio/best"])
+                
+                # Add audio quality option if audio format is selected
+                if "Audio Only" in format_option:
+                    quality_map = {
+                        "192KBPS": ["--audio-quality", "192K"],
+                        "256KBPS": ["--audio-quality", "256K"],
+                        "320KBPS": ["--audio-quality", "320K"],
+                        "Best": []  # Default is best quality
+                    }
+                    audio_quality = self.options.get("audio_quality", "192KBPS")
+                    if audio_quality in quality_map:
+                        cmd.extend(quality_map[audio_quality])
+                
+                # Set output path to temp directory first
+                temp_output = os.path.join(temp_dir, "%(title)s [%(id)s].%(ext)s")
+                cmd.extend(["-o", temp_output])
+                
+                if self.ffmpeg_dir:
+                    cmd.extend(["--ffmpeg-location", self.ffmpeg_dir])
+                
+                if self.options.get("is_playlist", False):
+                    cmd.append("--yes-playlist")
+                else:
+                    cmd.append("--no-playlist")
+                
+                if format_option not in ["Audio Only (MP3)", "Audio Only (OGG)"]:
+                    container = self.options.get("container", "MP4")
+                    if container != "Original":
+                        # Fix for MP4 quality issues
+                        cmd.extend(["--postprocessor-args", "ffmpeg:-c copy -movflags +faststart"])
+                        cmd.extend(["--merge-output-format", container.lower()])
+                
+                if format_option in ["Audio Only (MP3)", "Audio Only (OGG)"]:
+                    if self.settings.get("add_metadata", True):
+                        cmd.append("--add-metadata")
+                    if self.settings.get("embed_thumbnails", True):
+                        cmd.append("--embed-thumbnail")
+                
+                # Add thumbnail and description options
+                if self.options.get("write_thumbnail", False):
+                    cmd.append("--write-thumbnail")
+                if self.options.get("write_description", False):
+                    cmd.append("--write-description")
+                
+                self.output_signal.emit(f"Command: {' '.join(cmd)}\n")
+                
+                # Prepare process startup info
+                startupinfo = None
+                creation_flags = 0
+                if sys.platform == "win32":
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    if getattr(sys, 'frozen', False):
+                        creation_flags = subprocess.CREATE_NO_WINDOW
                 
                 try:
-                    line = process.stdout.readline()
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=8192,  # Optimized buffer size
+                        universal_newlines=True,
+                        startupinfo=startupinfo,
+                        creationflags=creation_flags
+                    )
+                except FileNotFoundError:
+                    self.output_signal.emit("Error: yt-dlp not found. Please ensure it's installed.")
+                    self.finished_signal.emit(False, "yt-dlp not installed")
+                    return
                 except Exception as e:
-                    self.output_signal.emit(f"Error reading output: {str(e)}")
-                    break
+                    self.output_signal.emit(f"Error starting process: {str(e)}")
+                    self.finished_signal.emit(False, f"Process error: {str(e)}")
+                    return
                 
-                if not line:
-                    break
+                if process.stdout is None:
+                    self.output_signal.emit("Error: No output stream available from process")
+                    self.finished_signal.emit(False, "No process output")
+                    return
                 
-                self.output_signal.emit(line)
-                
-                if "[download]" in line or "[ExtractAudio]" in line or "[Merger]" in line:
-                    match = re.search(r'(\d+\.\d+)%', line)
-                    if match:
-                        progress = float(match.group(1))
-                        self.progress_signal.emit(int(progress), line.strip())
-                
-                if "Destination:" in line:
-                    match = re.search(r'Destination:\s+(.+)', line)
-                    if match:
-                        self.downloaded_files.append(match.group(1))
-            
-            process.wait()
-            
-            if process.returncode == 0:
-                if format_option in ["Audio Only (MP3)", "Audio Only (OGG)"] and self.downloaded_files:
-                    try:
-                        info_cmd = ["yt-dlp", "--skip-download", "-j", self.url]
-                        info_output = subprocess.check_output(info_cmd, text=True, stderr=subprocess.STDOUT)
-                        video_info = json.loads(info_output)
+                # Read output in chunks to prevent freezing
+                last_progress_time = time.time()
+                while self.is_running:
+                    chunk = process.stdout.read(4096)
+                    if not chunk:
+                        break
+                    
+                    # Process chunk line by line
+                    for line in chunk.splitlines():
+                        self.output_signal.emit(line)
                         
-                        for file_path in self.downloaded_files:
-                            if os.path.exists(file_path):
-                                self.add_metadata(file_path, video_info)
-                                
-                                if self.settings.get("embed_thumbnails", True):
-                                    self.embed_thumbnail(file_path, video_info)
-                    except Exception as e:
-                        self.output_signal.emit(f"Metadata processing error: {str(e)}")
+                        # Throttle progress updates to prevent UI overload
+                        current_time = time.time()
+                        if current_time - last_progress_time > 0.1:  # 100ms throttle
+                            if "[download]" in line or "[ExtractAudio]" in line or "[Merger]" in line:
+                                match = re.search(r'(\d+\.\d+)%', line)
+                                if match:
+                                    progress = float(match.group(1))
+                                    self.progress_signal.emit(int(progress), line.strip())
+                                    last_progress_time = current_time
+                    
+                    # Allow system to process events
+                    QApplication.processEvents()
                 
-                self.finished_signal.emit(True, "Download completed successfully!")
-            else:
-                self.finished_signal.emit(False, f"Download failed with code {process.returncode}")
+                if not self.is_running:
+                    process.terminate()
+                    self.finished_signal.emit(False, "Download stopped by user")
+                    return
+                
+                process.wait()
+                
+                if process.returncode == 0:
+                    final_output = self.options.get("output_path", "")
+                    if final_output:
+                        final_output = os.path.abspath(final_output)
+                        os.makedirs(final_output, exist_ok=True)
+                        
+                        # Move all files from temp to final location
+                        moved_files = []
+                        for filename in os.listdir(temp_dir):
+                            src_path = os.path.join(temp_dir, filename)
+                            dest_path = os.path.join(final_output, filename)
+                            
+                            # Skip directories
+                            if os.path.isdir(src_path):
+                                continue
+                                
+                            # Handle existing files
+                            if os.path.exists(dest_path):
+                                try:
+                                    os.remove(dest_path)
+                                except Exception as e:
+                                    self.output_signal.emit(f"Error removing existing file: {str(e)}")
+                                    continue
+                            
+                            try:
+                                shutil.move(src_path, dest_path)
+                                moved_files.append(dest_path)
+                                self.output_signal.emit(f"Moved to: {dest_path}")
+                            except Exception as e:
+                                self.output_signal.emit(f"Error moving file: {str(e)}")
+                        
+                        self.downloaded_files = moved_files
+                    
+                    if format_option in ["Audio Only (MP3)", "Audio Only (OGG)"] and self.downloaded_files:
+                        try:
+                            info_cmd = ["yt-dlp", "--skip-download", "-j", self.url]
+                            creation_flags = 0
+                            if sys.platform == "win32" and getattr(sys, 'frozen', False):
+                                creation_flags = subprocess.CREATE_NO_WINDOW
+                                
+                            info_output = subprocess.check_output(
+                                info_cmd, 
+                                text=True, 
+                                stderr=subprocess.STDOUT,
+                                creationflags=creation_flags
+                            )
+                            video_info = json.loads(info_output)
+                            
+                            for file_path in self.downloaded_files:
+                                if os.path.exists(file_path):
+                                    ext = os.path.splitext(file_path)[1].lower()
+                                    if ext in ['.mp3', '.ogg']:
+                                        self.add_metadata(file_path, video_info)
+                                        
+                                        if self.settings.get("embed_thumbnails", True):
+                                            self.embed_thumbnail(file_path, video_info)
+                        except Exception as e:
+                            self.output_signal.emit(f"Metadata processing error: {str(e)}")
+                    
+                    self.finished_signal.emit(True, "Download completed successfully!")
+                else:
+                    self.finished_signal.emit(False, f"Download failed with code {process.returncode}")
         
         except Exception as e:
             self.finished_signal.emit(False, f"Error: {str(e)}")
@@ -323,8 +426,16 @@ class DownloadThread(QThread):
             if not thumbnail_url:
                 return
                 
-            response = requests.get(thumbnail_url, stream=True)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
+            # Create safe temp directory for frozen apps
+            temp_dir = Path(getattr(sys, '_MEIPASS', Path.cwd())) / "temp"
+            temp_dir.mkdir(exist_ok=True)
+                
+            response = requests.get(thumbnail_url, stream=True, timeout=10)
+            with tempfile.NamedTemporaryFile(
+                delete=False, 
+                suffix=".jpg", 
+                dir=str(temp_dir)
+            ) as tmp_file:
                 shutil.copyfileobj(response.raw, tmp_file)
                 thumb_path = tmp_file.name
             
@@ -376,7 +487,7 @@ class DownloadThread(QThread):
 class YouTubeDownloaderApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Modern YouTube Downloader")
+        self.setWindowTitle("GUI YouTube Downloader")
         self.setGeometry(100, 100, 900, 700)
         self.setStyleSheet("""
             QMainWindow {
@@ -491,6 +602,14 @@ class YouTubeDownloaderApp(QMainWindow):
         if index >= 0:
             self.container_combo.setCurrentIndex(index)
         
+        self.audio_quality_combo = QComboBox()
+        self.audio_quality_combo.addItems(["192KBPS", "256KBPS", "320KBPS", "Best"])
+        
+        audio_quality = self.settings.get("audio_quality", "192KBPS")
+        index = self.audio_quality_combo.findText(audio_quality)
+        if index >= 0:
+            self.audio_quality_combo.setCurrentIndex(index)
+        
         self.output_edit = QLineEdit()
         self.output_edit.setText(self.settings.get("download_path", ""))
         self.output_button = QPushButton("Browse...")
@@ -500,12 +619,26 @@ class YouTubeDownloaderApp(QMainWindow):
         output_layout.addWidget(self.output_edit)
         output_layout.addWidget(self.output_button)
         
+        self.container_label = QLabel("Container:")
+        self.audio_quality_label = QLabel("Audio Quality:")
+        
         format_layout.addRow("Format:", self.format_combo)
-        format_layout.addRow("Container:", self.container_combo)
+        format_layout.addRow(self.container_label, self.container_combo)
+        format_layout.addRow(self.audio_quality_label, self.audio_quality_combo)
         format_layout.addRow("Output Folder:", output_layout)
+        
+        # Extra options
+        self.thumbnail_check = QCheckBox("Save thumbnail")
+        self.description_check = QCheckBox("Save description")
+        format_layout.addRow("Extra Options:", self.thumbnail_check)
+        format_layout.addRow("", self.description_check)
         
         format_group.setLayout(format_layout)
         main_layout.addWidget(format_group)
+        
+        # Connect format change signal
+        self.format_combo.currentIndexChanged.connect(self.update_format_ui)
+        self.update_format_ui()  # Initial UI update
         
         progress_group = QGroupBox("Progress")
         progress_layout = QVBoxLayout()
@@ -562,6 +695,14 @@ class YouTubeDownloaderApp(QMainWindow):
         self.download_thread = None
         
         self.check_dependencies()
+    
+    def update_format_ui(self):
+        """Update UI based on selected format"""
+        is_audio = "Audio Only" in self.format_combo.currentText()
+        self.container_label.setVisible(not is_audio)
+        self.container_combo.setVisible(not is_audio)
+        self.audio_quality_label.setVisible(is_audio)
+        self.audio_quality_combo.setVisible(is_audio)
     
     def create_menu(self):
         menu_bar = QMenuBar(self)
@@ -623,6 +764,14 @@ class YouTubeDownloaderApp(QMainWindow):
         return False
     
     def check_dependencies(self):
+        # Handle frozen app paths
+        if getattr(sys, 'frozen', False):
+            base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+            ffmpeg_path = os.path.join(base_path, "ffmpeg")
+            if self.validate_ffmpeg_dir(ffmpeg_path):
+                self.log_message(f"Using bundled FFmpeg in: {ffmpeg_path}")
+                return True
+        
         if not shutil.which("yt-dlp"):
             self.log_message("Warning: yt-dlp not found in PATH. Please install it.")
         
@@ -647,7 +796,7 @@ class YouTubeDownloaderApp(QMainWindow):
             if self.validate_ffmpeg_dir(dir_path):
                 self.settings["ffmpeg_path"] = dir_path
                 self.save_settings()
-                self.log_message(f"Using bundled FFmpeg in: {dir_path}")
+                self.log_message(f"Using FFmpeg in: {dir_path}")
                 return True
         
         self.log_message("Warning: FFmpeg directory not found or incomplete. Some formats may not work properly.")
@@ -664,6 +813,13 @@ class YouTubeDownloaderApp(QMainWindow):
             self.save_settings()
             
             self.output_edit.setText(self.settings.get("download_path", ""))
+            
+            # Update audio quality combo
+            audio_quality = self.settings.get("audio_quality", "192KBPS")
+            index = self.audio_quality_combo.findText(audio_quality)
+            if index >= 0:
+                self.audio_quality_combo.setCurrentIndex(index)
+            
             self.check_dependencies()
     
     def disable_controls(self):
@@ -673,10 +829,13 @@ class YouTubeDownloaderApp(QMainWindow):
         self.url_input.setEnabled(False)
         self.format_combo.setEnabled(False)
         self.container_combo.setEnabled(False)
+        self.audio_quality_combo.setEnabled(False)
         self.output_edit.setEnabled(False)
         self.output_button.setEnabled(False)
         self.playlist_check.setEnabled(False)
         self.batch_check.setEnabled(False)
+        self.thumbnail_check.setEnabled(False)
+        self.description_check.setEnabled(False)
     
     def enable_controls(self):
         """Enable UI controls after download"""
@@ -685,51 +844,62 @@ class YouTubeDownloaderApp(QMainWindow):
         self.url_input.setEnabled(True)
         self.format_combo.setEnabled(True)
         self.container_combo.setEnabled(True)
+        self.audio_quality_combo.setEnabled(True)
         self.output_edit.setEnabled(True)
         self.output_button.setEnabled(True)
         self.playlist_check.setEnabled(True)
         self.batch_check.setEnabled(True)
+        self.thumbnail_check.setEnabled(True)
+        self.description_check.setEnabled(True)
     
     def start_download(self):
-        """Start download process - handles single or batch downloads"""
-        urls = [url.strip() for url in self.url_input.toPlainText().splitlines() if url.strip()]
-        
-        if not urls:
-            QMessageBox.warning(self, "Input Error", "Please enter at least one valid URL")
-            return
-        
-        output_path = self.output_edit.text().strip() or self.settings.get("download_path", "")
-        if not output_path:
-            QMessageBox.warning(self, "Input Error", "Please select an output directory")
-            return
-        
-        if not os.path.exists(output_path):
+        """Start optimized download process"""
+        try:
+            if self.download_thread and self.download_thread.isRunning():
+                self.download_thread.stop()
+                self.download_thread.wait(2000)
+            
+            urls = [url.strip() for url in self.url_input.toPlainText().splitlines() if url.strip()]
+            if not urls:
+                QMessageBox.warning(self, "Input Error", "Please enter at least one valid URL")
+                return
+            
+            output_path = self.output_edit.text().strip() or self.settings.get("download_path", "")
+            if not output_path:
+                QMessageBox.warning(self, "Input Error", "Please select an output directory")
+                return
+            
             try:
-                os.makedirs(output_path)
+                os.makedirs(output_path, exist_ok=True)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not create directory: {str(e)}")
                 return
-        
-        options = {
-            "format": self.format_combo.currentText(),
-            "container": self.container_combo.currentText(),
-            "output_path": output_path,
-            "is_playlist": self.playlist_check.isChecked()
-        }
-        
-        ffmpeg_dir = self.settings.get("ffmpeg_path", "")
-        
-        self.console_output.clear()
-        
-        if self.batch_check.isChecked() and len(urls) > 1:
-            self.download_queue = urls
-            self.current_download = None
-            self.queue_label.setText(f"Queue: {len(self.download_queue)}")
-            self.log_message(f"Starting batch download of {len(urls)} items")
-            self.process_next_download()
-        else:
-            self.download_queue = []
-            self.start_single_download(urls[0], options, ffmpeg_dir)
+            
+            options = {
+                "format": self.format_combo.currentText(),
+                "container": self.container_combo.currentText(),
+                "audio_quality": self.audio_quality_combo.currentText(),
+                "output_path": output_path,
+                "is_playlist": self.playlist_check.isChecked(),
+                "write_thumbnail": self.thumbnail_check.isChecked(),
+                "write_description": self.description_check.isChecked()
+            }
+            
+            self.console_output.clear()
+            
+            if self.batch_check.isChecked() and len(urls) > 1:
+                self.download_queue = urls
+                self.current_download = None
+                self.queue_label.setText(f"Queue: {len(self.download_queue)}")
+                self.log_message(f"Starting optimized batch download of {len(urls)} items")
+                self.process_next_download()
+            else:
+                self.download_queue = []
+                self.start_single_download(urls[0], options, self.settings.get("ffmpeg_path", ""))
+                
+        except Exception as e:
+            self.log_message(f"Download initialization error: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to start download: {str(e)}")
     
     def start_single_download(self, url, options, ffmpeg_dir):
         """Start download for a single URL"""
@@ -737,7 +907,7 @@ class YouTubeDownloaderApp(QMainWindow):
         
         self.progress_bar.setValue(0)
         self.status_label.setText(f"Starting download: {url[:50]}...")
-        self.log_message(f"Starting download: {url}")
+        self.log_message(f"Starting optimized download: {url}")
         
         self.download_thread = DownloadThread(
             url, 
@@ -763,8 +933,11 @@ class YouTubeDownloaderApp(QMainWindow):
                 {
                     "format": self.format_combo.currentText(),
                     "container": self.container_combo.currentText(),
+                    "audio_quality": self.audio_quality_combo.currentText(),
                     "output_path": self.output_edit.text().strip() or self.settings.get("download_path", ""),
-                    "is_playlist": self.playlist_check.isChecked()
+                    "is_playlist": self.playlist_check.isChecked(),
+                    "write_thumbnail": self.thumbnail_check.isChecked(),
+                    "write_description": self.description_check.isChecked()
                 },
                 self.settings.get("ffmpeg_path", "")
             )
@@ -826,6 +999,10 @@ class YouTubeDownloaderApp(QMainWindow):
             <li>Download log console</li>
             <li>FFmpeg integration</li>
             <li>Video container selection (MP4, WEBM, MKV)</li>
+            <li>Audio quality selection (192K, 256K, 320K)</li>
+            <li>Save thumbnail images</li>
+            <li>Save video descriptions</li>
+            <li>Optimized for system stability</li>
         </ul>
         <p><b>Powered by:</b></p>
         <ul>
@@ -834,7 +1011,7 @@ class YouTubeDownloaderApp(QMainWindow):
             <li>Mutagen - https://github.com/quodlibet/mutagen</li>
             <li>Audioread - https://github.com/beetbox/audioread</li>
         </ul>
-        <p>Version 2.0.0</p>
+        <p>Version 2.4.1</p>
         """
         QMessageBox.about(self, "About", about_text)
     
