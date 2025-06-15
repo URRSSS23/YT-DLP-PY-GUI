@@ -30,7 +30,7 @@ I know yt-dlp has a metadata library, but I didn't realize it =))
 ```bash
 
 pip install pyinstaller yt-dlp mutagen pillow requests
-
+or: pip install
 ```
 
 note:
