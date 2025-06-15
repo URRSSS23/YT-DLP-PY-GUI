@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import sys
 import subprocess
@@ -19,7 +18,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon, QAction, QTextCursor, QFont, QCloseEvent
 
-# Corrected metadata imports
 from mutagen.easyid3 import EasyID3
 from mutagen.id3 import ID3
 from mutagen.id3._frames import APIC
@@ -36,7 +34,6 @@ class SettingsDialog(QDialog):
         
         layout = QVBoxLayout()
         
-        # Default download path
         self.path_label = QLabel("Default Download Path:")
         self.path_edit = QLineEdit()
         self.path_browse = QPushButton("Browse...")
@@ -46,7 +43,6 @@ class SettingsDialog(QDialog):
         path_layout.addWidget(self.path_edit)
         path_layout.addWidget(self.path_browse)
         
-        # FFmpeg path
         self.ffmpeg_label = QLabel("FFmpeg Directory:")
         self.ffmpeg_edit = QLineEdit()
         self.ffmpeg_browse = QPushButton("Browse...")
@@ -56,7 +52,6 @@ class SettingsDialog(QDialog):
         ffmpeg_layout.addWidget(self.ffmpeg_edit)
         ffmpeg_layout.addWidget(self.ffmpeg_browse)
         
-        # Preferred formats
         self.format_label = QLabel("Preferred Format:")
         self.format_combo = QComboBox()
         self.format_combo.addItems([
@@ -69,17 +64,14 @@ class SettingsDialog(QDialog):
             "Audio Only (OGG)"
         ])
         
-        # Container format
         self.container_label = QLabel("Video Container:")
         self.container_combo = QComboBox()
         self.container_combo.addItems(["MP4", "WEBM", "MKV", "Original"])
         
-        # Metadata options
         self.metadata_label = QLabel("Metadata Options:")
         self.metadata_check = QCheckBox("Add metadata to audio files")
         self.thumbnail_check = QCheckBox("Embed thumbnails in audio files")
         
-        # Buttons
         self.save_button = QPushButton("Save Settings")
         self.save_button.clicked.connect(self.accept)
         self.cancel_button = QPushButton("Cancel")
@@ -90,7 +82,6 @@ class SettingsDialog(QDialog):
         button_layout.addWidget(self.save_button)
         button_layout.addWidget(self.cancel_button)
         
-        # Add widgets to layout
         layout.addWidget(self.path_label)
         layout.addLayout(path_layout)
         layout.addSpacing(10)
@@ -164,10 +155,8 @@ class DownloadThread(QThread):
     
     def run(self):
         try:
-            # Build command
             cmd = ["yt-dlp", self.url]
             
-            # Add format options
             format_map = {
                 "Best Quality": ["-f", "bestvideo+bestaudio/best"],
                 "1080p": ["-f", "bestvideo[height<=1080]+bestaudio[height<=1080]/best[height<=1080]"],
@@ -184,29 +173,24 @@ class DownloadThread(QThread):
             else:
                 cmd.extend(["-f", "bestvideo+bestaudio/best"])
             
-            # Output path - use absolute path with ID in filename
             output_path = self.options.get("output_path", "")
             if output_path:
                 abs_path = os.path.abspath(output_path)
                 cmd.extend(["-o", f"{abs_path}/%(title)s [%(id)s].%(ext)s"])
             
-            # FFmpeg directory
             if self.ffmpeg_dir:
                 cmd.extend(["--ffmpeg-location", self.ffmpeg_dir])
             
-            # Additional options
             if self.options.get("is_playlist", False):
                 cmd.append("--yes-playlist")
             else:
                 cmd.append("--no-playlist")
             
-            # Add container format for video downloads
             if format_option not in ["Audio Only (MP3)", "Audio Only (OGG)"]:
                 container = self.options.get("container", "MP4")
                 if container != "Original":
                     cmd.extend(["--merge-output-format", container.lower()])
             
-            # Add metadata for audio formats
             if format_option in ["Audio Only (MP3)", "Audio Only (OGG)"]:
                 if self.settings.get("add_metadata", True):
                     cmd.append("--add-metadata")
@@ -215,7 +199,6 @@ class DownloadThread(QThread):
             
             self.output_signal.emit(f"Command: {' '.join(cmd)}\n")
             
-            # Run the process with error handling
             try:
                 process = subprocess.Popen(
                     cmd,
@@ -234,13 +217,11 @@ class DownloadThread(QThread):
                 self.finished_signal.emit(False, f"Process error: {str(e)}")
                 return
             
-            # Handle case where process.stdout is None
             if process.stdout is None:
                 self.output_signal.emit("Error: No output stream available from process")
                 self.finished_signal.emit(False, "No process output")
                 return
             
-            # Read output safely
             while True:
                 if not self.is_running:
                     process.terminate()
@@ -257,14 +238,12 @@ class DownloadThread(QThread):
                 
                 self.output_signal.emit(line)
                 
-                # Extract progress
                 if "[download]" in line or "[ExtractAudio]" in line or "[Merger]" in line:
                     match = re.search(r'(\d+\.\d+)%', line)
                     if match:
                         progress = float(match.group(1))
                         self.progress_signal.emit(int(progress), line.strip())
                 
-                # Capture downloaded file names
                 if "Destination:" in line:
                     match = re.search(r'Destination:\s+(.+)', line)
                     if match:
@@ -273,21 +252,16 @@ class DownloadThread(QThread):
             process.wait()
             
             if process.returncode == 0:
-                # Process metadata for audio files
                 if format_option in ["Audio Only (MP3)", "Audio Only (OGG)"] and self.downloaded_files:
                     try:
-                        # Get video info for metadata
                         info_cmd = ["yt-dlp", "--skip-download", "-j", self.url]
                         info_output = subprocess.check_output(info_cmd, text=True, stderr=subprocess.STDOUT)
                         video_info = json.loads(info_output)
                         
-                        # Process each downloaded file
                         for file_path in self.downloaded_files:
                             if os.path.exists(file_path):
-                                # Add enhanced metadata
                                 self.add_metadata(file_path, video_info)
                                 
-                                # Embed thumbnail if requested
                                 if self.settings.get("embed_thumbnails", True):
                                     self.embed_thumbnail(file_path, video_info)
                     except Exception as e:
@@ -306,12 +280,11 @@ class DownloadThread(QThread):
             title = video_info.get('title', 'Unknown Title')
             artist = video_info.get('uploader', 'Unknown Artist')
             album = "YouTube Downloads"
-            date = video_info.get('upload_date', '')[:4]  # Year only
+            date = video_info.get('upload_date', '')[:4]  
             
             ext = os.path.splitext(file_path)[1].lower()
             
             if ext == '.mp3':
-                # Use ID3 directly for better compatibility
                 try:
                     audio = MP3(file_path, ID3=EasyID3)
                 except:
@@ -350,18 +323,15 @@ class DownloadThread(QThread):
             if not thumbnail_url:
                 return
                 
-            # Download thumbnail
             response = requests.get(thumbnail_url, stream=True)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
                 shutil.copyfileobj(response.raw, tmp_file)
                 thumb_path = tmp_file.name
             
-            # Process image
             img = Image.open(thumb_path)
             img.thumbnail((500, 500))
             img.save(thumb_path, "JPEG")
             
-            # Embed in audio file
             ext = os.path.splitext(file_path)[1].lower()
             
             if ext == '.mp3':
@@ -375,12 +345,11 @@ class DownloadThread(QThread):
                         self.output_signal.emit(f"Error adding tags: {str(e)}")
                         return
     
-                # Ensure tags exist before adding APIC frame
                 if audio.tags is not None:
                     apic = APIC(
-                        encoding=3,  # UTF-8
+                        encoding=3,
                         mime='image/jpeg',
-                        type=3,  # Cover image
+                        type=3, 
                         desc='Cover',
                         data=open(thumb_path, 'rb').read()
                     )
@@ -464,27 +433,21 @@ class YouTubeDownloaderApp(QMainWindow):
             }
         """)
         
-        # Initialize settings
         self.settings_file = "settings.json"
         self.settings = self.load_settings()
         
-        # Batch download queue
         self.download_queue = []
         self.current_download = None
         
-        # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # Main layout
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(20, 20, 20, 20)
         
-        # Create menu bar
         self.create_menu()
         
-        # URL section
         url_group = QGroupBox("Download URLs (one per line)")
         url_layout = QVBoxLayout()
         
@@ -500,7 +463,6 @@ class YouTubeDownloaderApp(QMainWindow):
         url_group.setLayout(url_layout)
         main_layout.addWidget(url_group)
         
-        # Format selection
         format_group = QGroupBox("Download Options")
         format_layout = QFormLayout()
         format_layout.setSpacing(10)
@@ -516,17 +478,14 @@ class YouTubeDownloaderApp(QMainWindow):
             "Audio Only (OGG)"
         ])
         
-        # Set default format from settings
         default_format = self.settings.get("preferred_format", "Best Quality")
         index = self.format_combo.findText(default_format)
         if index >= 0:
             self.format_combo.setCurrentIndex(index)
         
-        # Container selection
         self.container_combo = QComboBox()
         self.container_combo.addItems(["MP4", "WEBM", "MKV", "Original"])
         
-        # Set default container from settings
         default_container = self.settings.get("container", "MP4")
         index = self.container_combo.findText(default_container)
         if index >= 0:
@@ -548,7 +507,6 @@ class YouTubeDownloaderApp(QMainWindow):
         format_group.setLayout(format_layout)
         main_layout.addWidget(format_group)
         
-        # Progress bar
         progress_group = QGroupBox("Progress")
         progress_layout = QVBoxLayout()
         
@@ -569,7 +527,6 @@ class YouTubeDownloaderApp(QMainWindow):
         progress_group.setLayout(progress_layout)
         main_layout.addWidget(progress_group)
         
-        # Console output
         console_group = QGroupBox("Download Log")
         console_layout = QVBoxLayout()
         
@@ -581,7 +538,6 @@ class YouTubeDownloaderApp(QMainWindow):
         console_group.setLayout(console_layout)
         main_layout.addWidget(console_group)
         
-        # Control buttons
         button_layout = QHBoxLayout()
         
         self.start_button = QPushButton("Start Download")
@@ -603,17 +559,14 @@ class YouTubeDownloaderApp(QMainWindow):
         
         main_layout.addLayout(button_layout)
         
-        # Download thread
         self.download_thread = None
         
-        # Check for dependencies
         self.check_dependencies()
     
     def create_menu(self):
         menu_bar = QMenuBar(self)
         self.setMenuBar(menu_bar)
         
-        # File menu
         file_menu = QMenu("File", self)
         menu_bar.addMenu(file_menu)
         
@@ -621,7 +574,6 @@ class YouTubeDownloaderApp(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
-        # Settings menu
         settings_menu = QMenu("Settings", self)
         menu_bar.addMenu(settings_menu)
         
@@ -629,7 +581,6 @@ class YouTubeDownloaderApp(QMainWindow):
         settings_action.triggered.connect(self.open_settings)
         settings_menu.addAction(settings_action)
         
-        # Help menu
         help_menu = QMenu("Help", self)
         menu_bar.addMenu(help_menu)
         
@@ -665,7 +616,6 @@ class YouTubeDownloaderApp(QMainWindow):
             
         required_files = ["ffmpeg", "ffprobe"]
         for file in required_files:
-            # Check with extensions for Windows
             for ext in ["", ".exe", ".bat"]:
                 full_path = os.path.join(path, file + ext)
                 if os.path.exists(full_path):
@@ -673,18 +623,15 @@ class YouTubeDownloaderApp(QMainWindow):
         return False
     
     def check_dependencies(self):
-        # Check if yt-dlp is installed
         if not shutil.which("yt-dlp"):
             self.log_message("Warning: yt-dlp not found in PATH. Please install it.")
         
-        # Check for FFmpeg
         ffmpeg_dir = self.settings.get("ffmpeg_path", "")
         
         if ffmpeg_dir and self.validate_ffmpeg_dir(ffmpeg_dir):
             self.log_message(f"FFmpeg found in: {ffmpeg_dir}")
             return True
         
-        # Check in common locations
         app_dir = os.path.dirname(os.path.abspath(__file__))
         possible_dirs = [
             os.path.join(app_dir, "ffmpeg"),
@@ -693,7 +640,6 @@ class YouTubeDownloaderApp(QMainWindow):
             os.path.join(app_dir)
         ]
         
-        # Also check system PATH
         for dir_path in os.get_exec_path():
             possible_dirs.append(dir_path)
         
@@ -717,7 +663,6 @@ class YouTubeDownloaderApp(QMainWindow):
             self.settings.update(new_settings)
             self.save_settings()
             
-            # Update UI with new settings
             self.output_edit.setText(self.settings.get("download_path", ""))
             self.check_dependencies()
     
@@ -747,7 +692,6 @@ class YouTubeDownloaderApp(QMainWindow):
     
     def start_download(self):
         """Start download process - handles single or batch downloads"""
-        # Get all URLs
         urls = [url.strip() for url in self.url_input.toPlainText().splitlines() if url.strip()]
         
         if not urls:
@@ -759,7 +703,6 @@ class YouTubeDownloaderApp(QMainWindow):
             QMessageBox.warning(self, "Input Error", "Please select an output directory")
             return
         
-        # Create directory if it doesn't exist
         if not os.path.exists(output_path):
             try:
                 os.makedirs(output_path)
@@ -767,7 +710,6 @@ class YouTubeDownloaderApp(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Could not create directory: {str(e)}")
                 return
         
-        # Prepare options
         options = {
             "format": self.format_combo.currentText(),
             "container": self.container_combo.currentText(),
@@ -775,13 +717,10 @@ class YouTubeDownloaderApp(QMainWindow):
             "is_playlist": self.playlist_check.isChecked()
         }
         
-        # Get FFmpeg directory from settings
         ffmpeg_dir = self.settings.get("ffmpeg_path", "")
         
-        # Clear console
         self.console_output.clear()
         
-        # Handle batch download
         if self.batch_check.isChecked() and len(urls) > 1:
             self.download_queue = urls
             self.current_download = None
@@ -789,21 +728,17 @@ class YouTubeDownloaderApp(QMainWindow):
             self.log_message(f"Starting batch download of {len(urls)} items")
             self.process_next_download()
         else:
-            # Single download
             self.download_queue = []
             self.start_single_download(urls[0], options, ffmpeg_dir)
     
     def start_single_download(self, url, options, ffmpeg_dir):
         """Start download for a single URL"""
-        # Disable controls during download
         self.disable_controls()
         
-        # Reset progress
         self.progress_bar.setValue(0)
         self.status_label.setText(f"Starting download: {url[:50]}...")
         self.log_message(f"Starting download: {url}")
         
-        # Start download thread
         self.download_thread = DownloadThread(
             url, 
             options, 
@@ -845,27 +780,23 @@ class YouTubeDownloaderApp(QMainWindow):
             self.log_message("Download stopped by user")
     
     def download_finished(self, success, message):
-        # Update status
         self.status_label.setText(message)
         self.log_message(message)
         
         if success:
             self.progress_bar.setValue(100)
             
-            # Process next in queue if batch mode
             if self.download_queue:
                 QApplication.processEvents()
-                time.sleep(1)  # Brief pause between downloads
+                time.sleep(1) 
                 self.process_next_download()
                 return
         else:
             QMessageBox.warning(self, "Download Failed", message)
             
-            # Clear queue on error
             self.download_queue = []
             self.queue_label.setText("Queue: 0")
         
-        # Re-enable controls
         self.enable_controls()
     
     def update_progress(self, value, status):
@@ -881,7 +812,7 @@ class YouTubeDownloaderApp(QMainWindow):
     
     def show_about(self):
         about_text = """
-        <h2>Modern YouTube Downloader</h2>
+        <h2>GUI YouTube Downloader</h2>
         <p>A modern GUI application for downloading YouTube videos using yt-dlp.</p>
         <p><b>Features:</b></p>
         <ul>
@@ -917,7 +848,7 @@ class YouTubeDownloaderApp(QMainWindow):
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self.download_thread.stop()
-                self.download_thread.wait(2000)  # Wait up to 2 seconds
+                self.download_thread.wait(2000) 
                 if a0:
                     a0.accept()
             else:
@@ -930,10 +861,8 @@ class YouTubeDownloaderApp(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     
-    # Set application style
     app.setStyle("Fusion")
     
-    # Set dark palette for better UI
     dark_palette = app.palette()
     dark_palette.setColor(dark_palette.ColorRole.Window, Qt.GlobalColor.darkGray)
     dark_palette.setColor(dark_palette.ColorRole.WindowText, Qt.GlobalColor.white)
