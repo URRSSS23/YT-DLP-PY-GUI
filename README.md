@@ -23,6 +23,7 @@ A feature-rich YouTube downloader with GUI built using Python and PyQt6. Support
 - [FFmpeg](https://github.com/yt-dlp/FFmpeg-Builds/releases)
 - [Audioread library](https://github.com/beetbox/audioread)
 - [mutagen for metadata](https://github.com/quodlibet/mutagen)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 
 # Note 
 I know yt-dlp has a metadata library, but I didn't realize it =))
