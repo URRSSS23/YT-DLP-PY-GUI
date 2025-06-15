@@ -1,9 +1,10 @@
 import os
 import shutil
+import sys
 from PyInstaller.__main__ import run
 
 # Configuration
-APP_NAME = 'yt-dlp'
+APP_NAME = 'yt-dlp_gui'
 SCRIPT_FILE = 'youtube_downloader.py'
 ICON_FILE = 'app_icon.ico'  # Create or download an icon file
 FFMPEG_DIR = 'ffmpeg'  # Place FFmpeg binaries here
@@ -14,26 +15,31 @@ DIST_DIR = 'dist'
 os.makedirs(BUILD_DIR, exist_ok=True)
 os.makedirs(DIST_DIR, exist_ok=True)
 
-# PyInstaller options
+# PyInstaller options with all required hidden imports
 opts = [
     f'--name={APP_NAME}',
     '--onefile',
     '--windowed',
     '--noconsole',
     f'--icon={ICON_FILE}',
-    '--add-data=ffmpeg;ffmpeg',
+    f'--add-data={FFMPEG_DIR};{FFMPEG_DIR}',
     '--add-data=app_icon.ico;.',
     '--hidden-import=mutagen.id3',
     '--hidden-import=mutagen.oggvorbis',
-    '--hidden-import=PIL',
+    '--hidden-import=mutagen.mp3',
+    '--hidden-import=mutagen.flac',
+    '--hidden-import=PIL.Image',
+    '--hidden-import=PIL._imaging',
     '--hidden-import=requests',
     '--collect-all=yt_dlp',
     SCRIPT_FILE
 ]
 
+# Add platform-specific flags
+if sys.platform == 'win32':
+    opts.append('--uac-admin')  # Request admin privileges if needed
+
 # Run PyInstaller
 run(opts)
 
-# Copy FFmpeg to dist directory
-print("\nCopying FFmpeg to distribution directory...")
-shutil.copytree(FFMPEG_DIR, os.path.join(DIST_DIR, APP_NAME, FFMPEG_DIR))
+print("\nBuild completed successfully!")
