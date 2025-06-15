@@ -1,9 +1,1 @@
-PyQt6==6.4.2
-yt-dlp==2025.06.09
-mutagen==1.46.0
-Pillow==10.0.0
-requests==2.31.0
-
-or 
-
-pip install pyqt6 pyinstaller yt-dlp
+pip install PyQt6 yt-dlp mutagen Pillow requests
