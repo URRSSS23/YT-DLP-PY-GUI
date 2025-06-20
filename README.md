@@ -22,7 +22,6 @@ A feature-rich YouTube downloader with GUI built using Python and PyQt6. Support
 * **Vimeo**
 * **Dailymotion**
 * **Facebook**
-* **Instagram**
 * **TikTok**
 * **Twitter (X)**
 * **Twitch**
